@@ -1,10 +1,33 @@
 let api = "https://calcourse.jackli.org/api/v1/";
 let cookiesLoaded = false;
+let isWechat = /micromessenger/.test(navigator.userAgent.toLowerCase());
 
 $(() => {
-    if (/micromessenger/.test(navigator.userAgent.toLowerCase())) {
-        $("#wechat-message").removeClass("hidden");
-        return;
+    $.urlParam = (name) => {
+        let results = new RegExp('[\?&]' + name + '=([^&#]*)').exec(window.location.href);
+        if (results && results.length >= 2) {
+            return results[1] || 0;
+        }
+    };
+
+    let token = readCookie("token");
+
+    if (isWechat) {
+
+        if($.urlParam("token")){
+            token = $.urlParam("token")
+            createCookie("token", token, 144000);
+            document.location.replace('index.html');
+        } //fix a weird bug with wechat
+
+        if (!token && /\?token=(.+)/.test(document.location.hash)) {
+            token = RegExp.$1;
+            createCookie("token", token, 144000);
+            document.location.hash = '';
+        } else if (!token) {
+            $("#wechat-message").removeClass("hidden");
+            return;
+        }
     }
 
     $("#login-wrapper").removeClass("hidden");
@@ -12,7 +35,7 @@ $(() => {
     $("#search-input").on("input", () => {
         filter();
     });
-    
+
     $(".about-toggle").on("click", () => {
         $("#about-container").toggleClass("hidden");
     });
@@ -25,33 +48,39 @@ $(() => {
         $("#cookies-container").toggleClass("hidden");
     });
 
-    $.urlParam = (name) => {
-        let results = new RegExp('[\?&]' + name + '=([^&#]*)').exec(window.location.href);
-        if (results && results.length >= 2) {
-            return results[1] || 0;
-        }
-    }
+
 
     if ($.urlParam("timeout")) {
         $("#login-wrapper>div:first-child").text("会话过期，请重新登陆。");
     }
 
-    let token = readCookie("token");
     if (token) {
         loadCourses(token);
     } else {
-        gapi.load('auth2', () => {
-            auth2 = gapi.auth2.init({
-                client_id: '707915550129-7l94p2dpplaoub3d6clhrjpivki6dqpe.apps.googleusercontent.com',
-                cookiepolicy: 'single_host_origin'
-            });
-            auth2.attachClickHandler($("#login-button")[0], {}, onSignIn, (error) => {
-                if (error.error.indexOf("closed by user") == -1) {
-                    alert("无法登陆，请稍后再试。");
-                    console.log(error.error);
-                }
-            });
-        });    
+        var script = document.createElement('script');
+        script.src = 'https://apis.google.com/js/platform.js';
+        script.onload = script.onreadystatechange = function () {
+
+            if (!this.readyState || this.readyState == 'loaded' || this.readyState == 'complete') {
+
+                gapi.load('auth2', () => {
+                    auth2 = gapi.auth2.init({
+                        client_id: '707915550129-7l94p2dpplaoub3d6clhrjpivki6dqpe.apps.googleusercontent.com',
+                        cookiepolicy: 'single_host_origin'
+                    });
+                    auth2.attachClickHandler($("#login-button")[0], {}, onSignIn, (error) => {
+                        if (error.error.indexOf("closed by user") == -1) {
+                            alert("无法登陆，请稍后再试。");
+                            console.log(error.error);
+                        }
+                    });
+                });
+
+            }
+
+        };
+        script.type = 'text/javascript';
+        document.getElementsByTagName('head')[0].appendChild(script);
     }
 });
 
@@ -67,7 +96,7 @@ let entityMap = {
     '`': '&#x60;',
     '=': '&#x3D;'
 };
-  
+
 function escapeHtml(string) {
     return String(string).replace(/[&<>"'`=\/]/g, function (s) {
         return entityMap[s];
@@ -103,10 +132,15 @@ function addCard(id, name, url, term) {
 }
 
 function cardClick(e) {
-    alert("请保存图片，在微信扫一扫中选择相册打开。");
-    let img = $(e.currentTarget).find("img").attr("src");
-    // img = img.substring(img.indexOf(",") + 1);
-    window.location.href = img;
+    if (isWechat){
+        //let wechatGroup = $(e.currentTarget).attr('data-url')
+        alert("请长按卡片加群")
+    } else {
+        alert("请保存图片，在微信扫一扫中选择相册打开。");
+        let img = $(e.currentTarget).find("img").attr("src");
+        // img = img.substring(img.indexOf(",") + 1);
+        window.location.href = img;
+    }
 }
 
 function filter() {
@@ -129,7 +163,8 @@ function onSignIn(googleUser) {
     let email = profile.getEmail();
     $.ajax({url: api + "auth/", type: "POST",
             data: {email: email}, success: (response) => {
-        createCookie("token", response.token, 60);
+        createCookie("token", response.token, 144000);
+        document.location.hash = '?token='+ response.token;
         if ($.urlParam("redirect") === "add") {
             window.location.href = "add.html";
         } else if ($.urlParam("redirect") === "queue") {
@@ -237,6 +272,11 @@ function loadCourses(token) {
         }
     }, error: (response) => {
         console.log(response);
+        if (response.status===401) {
+            deleteCookie("token")
+            alert("会话过期，请重新登陆。")
+            window.location.replace("index.html")
+        }
     }});
 }
 
@@ -256,4 +296,8 @@ function readCookie(name) {
         }
     }
     return null;
+}
+
+function deleteCookie(name) {
+    document.cookie = encodeURIComponent(name) + "= ; expires = Thu, 01 Jan 1970 00:00:00 GMT; path=/"
 }
